@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""
+Read an obfuscated expression from a text file, reconstruct the Base64 string,
+Base64-decode it, gzip-decompress it (if gzipped), write bytes to decoded_output.bin,
+and print a text preview.
+
+Usage:
+    python3 decode_from_file.py obf.txt
+    python3 decode_from_file.py obf.txt S    # second arg overrides replacement for {0}
+"""
+import sys
+import re
+import base64
+import gzip
+from pathlib import Path
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 decode_from_file.py <input_file> [replacement_char_for_{0}]")
+        sys.exit(1)
+
+    input_path = Path(sys.argv[1])
+    if not input_path.exists():
+        print(f"File not found: {input_path}")
+        sys.exit(1)
+
+    replacement = sys.argv[2] if len(sys.argv) >= 3 else "S"
+
+    obf_text = input_path.read_text(encoding="utf-8", errors="replace")
+
+    # 1) extract every ''...'' fragment
+    fragments = re.findall(r"''([^']*)''", obf_text)
+    if not fragments:
+        print("No ''...'' fragments found. Make sure the file contains the obfuscated expression exactly.")
+        sys.exit(1)
+
+    b64_joined = "".join(fragments)
+
+    # 2) replace placeholders like {0} with chosen replacement (default 'S')
+    b64_joined = b64_joined.replace("{0}", replacement)
+
+    # 3) defensive cleaning
+    b64_joined = "".join(b64_joined.split())
+
+    # 4) Base64 decode
+    try:
+        raw = base64.b64decode(b64_joined, validate=True)
+    except Exception as e:
+        print("Base64 decode failed:", e)
+        sys.exit(1)
+
+    # 5) Try gzip-decompress
+    try:
+        decompressed = gzip.decompress(raw)
+        out_bytes = decompressed
+        print("Gzip decompression succeeded.")
+    except Exception as e:
+        print("Gzip decompression failed (or data not gzipped):", e)
+        out_bytes = raw
+
+    # 6) Write output bytes
+    out_file = Path("decoded_output.bin")
+    out_file.write_bytes(out_bytes)
+    print(f"Wrote {len(out_bytes)} bytes to {out_file.resolve()}")
+
+    # 7) Print a UTF-8 text preview (with replacement for invalid bytes)
+    try:
+        text = out_bytes.decode("utf-8", errors="replace")
+        preview = text[:10000]  # up to 10k chars
+        print("\n----- decoded (text preview) -----\n")
+        print(preview)
+        if len(text) > len(preview):
+            print("\n... (truncated preview) ...")
+        print("\n----- end preview -----\n")
+    except Exception as e:
+        print("Could not decode bytes to text for preview:", e)
+
+if __name__ == "__main__":
+    main()
